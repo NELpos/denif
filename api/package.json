@@ -1,0 +1,25 @@
+{
+  "name": "denif-api",
+  "version": "1.0.0",
+  "description": "denif raid bot",
+  "main": "index.js",
+  "scripts": {
+    "test": "npm test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NELpos/denif.git"
+  },
+  "keywords": [
+    "lostark"
+  ],
+  "author": "nelpos",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/NELpos/denif/issues"
+  },
+  "homepage": "https://github.com/NELpos/denif#readme",
+  "dependencies": {
+    "firebase": "^7.12.0"
+  }
+}
