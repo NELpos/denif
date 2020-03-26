@@ -20,6 +20,20 @@
   },
   "homepage": "https://github.com/NELpos/denif#readme",
   "dependencies": {
-    "firebase": "^7.12.0"
+    "@discordjs/opus": "^0.1.0",
+    "bufferutil": "^4.0.1",
+    "command-line-usage": "^6.1.0",
+    "discord.js": "^12.0.2",
+    "erlpack": "github:discordapp/erlpack",
+    "ffmpeg-static": "^4.0.1",
+    "firebase": "^7.12.0",
+    "firebase-admin": "^8.10.0",
+    "libsodium-wrappers": "^0.7.6",
+    "lodash": "^4.17.15",
+    "node-opus": "^0.3.3",
+    "opusscript": "0.0.7",
+    "sprintf-js": "^1.1.2",
+    "utf-8-validate": "^5.0.2",
+    "zlib-sync": "^0.1.6"
   }
 }
