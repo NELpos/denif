@@ -33,15 +33,6 @@ function getCharacter(characterName) {
 				elClassHandle[0]
 			);
 
-			//클래스 이미지
-
-			let characterClassImage = await page.evaluate(sel => {
-				return document
-					.querySelector(sel)
-					.getAttribute('src')
-					.replace('//', 'https://');
-			}, '#lostark-wrapper > div > main > div > div.profile-ingame > div.profile-characters > ul > li:nth-child(1) > a > div.user-thumb > img');
-
 			//길드
 			let elGuildHandle = await page.$x(
 				'//*[@id="lostark-wrapper"]/div/main/div/div[2]/div[2]/div[1]/div[1]/div[2]/span[2]'
@@ -67,7 +58,6 @@ function getCharacter(characterName) {
                     server : server,
 					name: characterName,
 					characterClass: characterClass,
-					characterClassImage: characterClassImage,
 					guild: guild,
 					itemLevel: itemLevel
 				}

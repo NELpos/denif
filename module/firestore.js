@@ -14,192 +14,155 @@ function init() {
 	return db;
 }
 
-//문서 전체 검색
-async function getDocs(db, collectionName) {
-	try {
-		let docRef = db.collection(collectionName);
-		let data = [];
-		let snapshot = await docRef.get();
-		if (snapshot.empty) return { code: -1, resMsg: '[get]no data' };
-		snapshot.forEach(doc => {
-			data.push(doc.data());
-		});
-		return { code: 1, resMsg: '[get]success', data: data };
-	} catch (err) {
-		console.log(err.stack);
-		return { code: 0, resMsg: err.stack };
+class NotFoundError extends Error {
+	constructor(message) {
+		super(message);
+		this.name = 'NotFoundError';
 	}
 }
 
-//문서 조건 검색
-async function getDoc(db, collectionName, docName) {
-	try {
-		let docRef = db.collection(collectionName).doc(docName);
-		let doc = await docRef.get();
-		if (!doc.exists) {
-			return { code: -1, resMsg: '[get]no data' };
+//문서 전체 검색
+async function getDocs(db, collectionName) {
+	return new Promise(async (resolve, reject) => {
+		try {
+			let docRef = db.collection(collectionName);
+				data = [],
+				snapshot = await docRef.get();
+			if (snapshot.empty) throw new NotFoundError('[get]not found docs');
+			snapshot.forEach(doc => {
+				data.push(doc.data());
+			});
+			return resolve({ code: 1, resMsg: '[get]success', data: data });
+		} catch (err) {
+			let errObj = undefined;
+			switch(err.name) {
+				case 'NotFoundError':
+					errObj = { code: -1, resMsg: err.stack };
+					break;
+				default :
+					errObj = { code: 0, resMsg: err.stack };
+			}
+			return resolve(errObj);
 		}
-		return { code: 1, resMsg: '[get]success', data: doc.data() };
-	} catch (err) {
-		console.log(err.stack);
-		return { code: 0, resMsg: err.stack };
-	}
+	})
+}
+
+//문서 검색
+async function getDoc(db, collectionName, docName) {
+	return new Promise(async (resolve, reject) => {
+		try {
+			let docRef = db.collection(collectionName).doc(docName);
+			let doc = await docRef.get();
+			if (!doc.exists) throw new NotFoundError('[get]not found doc');
+			return resolve({ code: 1, resMsg: '[get]success', data: doc.data()});
+		} catch (err) {
+			let errObj = undefined;
+			switch(err.name) {
+				case 'NotFoundError':
+					errObj = { code: -1, resMsg: err.stack };
+					break;
+				default :
+					errObj = { code: 0, resMsg: err.stack };
+			}
+			return resolve(errObj);
+		}
+	})
+
+}
+
+//문서 조건 검색
+async function getWhereDoc(db, collectionName, conditionInfo) {
+	return new Promise(async (resolve, reject) => {
+		try {
+			let docRef = db
+				.collection(collectionName)
+				.where(
+					conditionInfo.column,
+					conditionInfo.operator,
+					conditionInfo.value
+				);
+			let snapshot = await docRef.get();
+			let docDataArr = [];
+			if (snapshot.empty) throw new NotFoundError('[get]not found doc'); 
+			snapshot.forEach(doc => {
+				docDataArr.push(doc.id);
+			});
+			return resolve({ code: 1, resMsg: '[get]success', data: docDataArr });
+		} catch (err) {
+			let errObj = undefined;
+			switch(err.name) {
+				case 'NotFoundError':
+					errObj = { code: -1, resMsg: err.stack };
+					break;
+				default :
+					errObj = { code: 0, resMsg: err.stack };
+			}
+			return resolve(errObj);
+		}
+	})
 }
 
 //문서 삭제
 async function deleteDoc(db, collectionName, docName) {
-	try {
-		let deleteDoc = await db
-			.collection(collectionName)
-			.doc(docName)
-			.delete();
-		return { code: 1, resMsg: '[delete]success' };
-	} catch (err) {
-		return { code: 0, resMsg: err.stack };
-	}
+	return new Promise(async (resolve, reject) => {
+		try {
+			let deleteDoc = await db
+				.collection(collectionName)
+				.doc(docName)
+				.delete();
+			resolve({ code: 1, resMsg: '[delete]success' });
+		} catch (err) {
+			let errObj = undefined;
+			switch(err.name) {
+				default :
+					errObj = { code: 0, resMsg: err.stack };
+			}
+			resolve(errObj);
+		}
+	})
+
 }
 
-
-//문서 등록 
+//문서 등록
 async function setDoc(db, collectionName, docName, setData) {
-	try {
-		let docRef = db.collection(collectionName).doc(docName);
-		let setInfo = await docRef.set(setData);
-		return {code : 1, resMsg : '[set]success'};
-	} catch(err) {
-		return {code : 0, resMsg : err.stack};
-	}
+	return new Promise(async (resolve, reject) => {
+		try {
+			let docRef = db.collection(collectionName).doc(docName);
+			let setInfo = await docRef.set(setData);
+			return resolve({ code: 1, resMsg: '[set]success' });
+		} catch (err) {
+			let errObj = undefined;
+			switch(err.name) {
+				default :
+					errObj = { code: 0, resMsg: err.stack };
+			}
+			return resolve(errObj);
+		}
+	})
 }
 
 //문서 업데이트
 async function updateDoc(db, collectionName, docName, updateData) {
-	try {
-		let docRef = db.collection(collectionName).doc(docName);
-		let updateInfo = await docRef.update(updateData);
-		return {code : 1, resMsg : '[update]success'};
-	} catch(err) {
-		return {code : 0, resMsg : err.stack};
-	}
-}
-
-//캐릭터 등록
-function registerCharacter(db, characterInfo, discordInfo) {
-	return new Promise((resolve, reject)=> {
+	return new Promise(async (resolve, reject) => {
 		try {
-			getDoc(db, 'characters', characterInfo.name).then(res => {
-				if (res.code === 1) resolve({ code : -1, resMsg : "이미 등록되어 있는 캐릭터입니다."});
-				resolve({code : 1, resMsg : setDoc(db, 'characters', characterInfo.name, {
-					server : characterInfo.server,
-					name : characterInfo.name,
-					class: characterInfo.characterClass,
-					classImage : characterInfo.characterClassImage,
-					itemLevel: characterInfo.itemLevel,
-					guild : characterInfo.guild,
-					synergy: [],
-					raid: [],
-					discord : {
-						username : discordInfo.username,
-						discriminator : discordInfo.discriminator,
-						id : discordInfo.id
-					} 
-				})})
-			});
-
+			let docRef = db.collection(collectionName).doc(docName);
+			let updateInfo = await docRef.update(updateData);
+			return resolve({ code: 1, resMsg: '[update]success' });
 		} catch (err) {
-			resolve({code : 0, resMsg : err.stack})
-		}
-	});
-}
-
-//캐릭터 삭제
-function deleteCharacter(db, characterName) {
-	return new Promise((resolve, reject)=> {
-		try {
-			getDoc(db, 'characters', characterName).then(res => {
-				if (res.code === -1) resolve({ code : -1, resMsg : "캐릭터 등록 [캐릭터명]` 명령을 통해 캐릭터를 등록하세요."});
-				resolve(deleteDoc(db, 'characters', characterName));
-			})
-		} catch (err) {
-			resolve({code : 0, resMsg : err.stack})
-		}
-	});
-}
-
-//캐릭터 아이템레벨/길드 갱신
-function updateCharacter(db, updateCharacterInfo) {
-	return new Promise((resolve, reject)=> {
-		try {
-			getDoc(db, 'characters', updateCharacterInfo.name).then(res => {
-				if (res.code === -1) resolve({ code : -1, resMsg : "denif에 등록되어 있지 않은 캐릭터입니다. `캐릭터 등록 [캐릭터명]` 명령을 통해 캐릭터를 등록하세요."});
-				resolve(updateDoc(db, 'characters', updateCharacterInfo.name, updateCharacterInfo));
-			})
-		} catch (err) {
-			resolve({code : 0, resMsg : err.stack})
-		}
-	});
-}
-
-
-//레이드 등록
-function registerRaid(db, raidName, personnel = 8) {
-	let docRef = db.collection('raids').doc(raidName);
-	let setInfo = docRef.set({
-		uuid: uuid4(),
-		name: raidName,
-		personnel: personnel
-	});
-}
-//전체 레이드 조회
-function getRaids(db, raidName) {
-	return new Promise((resolve, reject) => {
-		resolve(getDocs(db, 'raids'));
-	});
-}
-
-//특정 레이드 조회
-function getRaid(db, raidName) {
-	return new Promise((resolve, reject) => {
-		resolve(getDoc(db, 'raids', raidName));
-	});
-}
-
-//레이드 삭제
-async function deleteRaid(db, raidName) {
-	return deleteDoc(db, 'raids', raidName);
-}
-
-function lookupCharactersByCharacterName() {}
-
-function lookupCharactersByDiscordID() {}
-
-function lookupCharacters(db, type, command) {
-	db.collection('characters')
-		.get()
-		.then(snapshot => {
-			snapshot.forEach(doc => {
-				console.log(doc.id, '=>', doc.data());
-			});
-		})
-		.catch(err => {
-			console.log('Error getting documents', err);
-		});
-}
-
-//시너지 등록
-function registerSynergy(db, synergyInfo) {
+			let errObj = undefined;
+			switch(err.name) {
+				default :
+					errObj = { code: 0, resMsg: err.stack };
+			}
+			return resolve(errObj);		}
+	})
 
 }
 
 module.exports.init = init;
-
-//레이드
-module.exports.registerRaid = registerRaid;
-module.exports.deleteRaid = deleteRaid;
-module.exports.getRaid = getRaid;
-module.exports.getRaids = getRaids;
-
-//캐릭터
-module.exports.registerCharacter = registerCharacter;
-module.exports.lookupCharacters = lookupCharacters;
-module.exports.deleteCharacter = deleteCharacter;
-module.exports.updateCharacter = updateCharacter;
+module.exports.getDocs = getDocs;
+module.exports.getDoc = getDoc;
+module.exports.getWhereDoc = getWhereDoc;
+module.exports.deleteDoc = deleteDoc;
+module.exports.setDoc = setDoc;
+module.exports.updateDoc = updateDoc;
