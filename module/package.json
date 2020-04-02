@@ -9,13 +9,19 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "command-line-usage": "^6.1.0",
     "discord.js": "^12.0.2",
     "firebase": "^7.12.0",
     "firebase-admin": "^8.10.0",
     "firebase-functions": "^3.5.0",
+    "moment": "^2.24.0",
+    "moment-timezone": "^0.5.28",
     "puppeteer": "^2.1.1",
+    "q": "^1.5.1",
+    "request": "^2.88.2",
+    "request-promise": "^4.2.5",
     "sprintf-js": "^1.1.2",
-    "uuid4": "^1.1.4"
+    "sync-request": "^6.1.0",
+    "uuid4": "^1.1.4",
+    "webhook-discord": "^3.6.0"
   }
 }

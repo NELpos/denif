@@ -3,6 +3,7 @@ const Discord = require('discord.js');
 const sprintf = require('sprintf-js').sprintf;
 const fs = require('./firestore');
 const character = require('./character');
+const discordUtil = require('./discordUtil');
 
 class DebugError extends Error {
 	constructor(message) {
@@ -15,6 +16,13 @@ class CommandError extends Error {
 	constructor(message) {
 		super(message);
 		this.name = 'CommandError';
+	}
+}
+
+class EscapeError extends Error {
+	constructor(message) {
+		super(message);
+		this.name = 'EscapeError';
 	}
 }
 
@@ -32,30 +40,42 @@ class DuplicateError extends Error {
 	}
 }
 
-class TimeOutError extends Error {
-	constructor(message) {
-		super(message);
-		this.name = 'TimeOutError';
-	}
-}
-
 //레이드 등록
-function registerRaid(db, raidName, personnel = 8) {
+function registerRaid(db, msg) {
 	return new Promise(async (resolve, reject) => {
 		try {
+			//공대명 입력
+			let collectRes = await discordUtil.collectMsg(msg, [
+				'등록하실 `레이드명`을 입력해주세요.'
+			]);
+
+			if (collectRes.code === -2) throw new EscapeError(collectRes.replyMsg);
+			let raidName = collectRes.replyMsg;
+
 			let res = await fs.getDoc(db, 'raids', raidName);
 			if (res.code === 1)
 				throw new DuplicateError(
 					sprintf('`%s`는 이미 등록되어 레이드입니다.', raidName)
 				);
 
+			//
+			collectRes = await discordUtil.collectMsg(msg, [
+				'참가가능한 `인원수`를 입력해주세요.'
+			]);
+			if (collectRes.code === -2) throw new EscapeError(collectRes.replyMsg);
+			let personnel = parseInt(collectRes.replyMsg);
+
 			res = await fs.setDoc(db, 'raids', raidName, {
 				name: raidName,
 				personnel: personnel,
 				participants: {},
 				parties: {},
-				news: {}
+				strategy: {},
+				imageUrl: ''
 			});
+
+			//레이드 이름 반환
+			res.data = raidName;
 			resolve(res);
 		} catch (err) {
 			switch (err.name) {
@@ -69,7 +89,7 @@ function registerRaid(db, raidName, personnel = 8) {
 	});
 }
 //전체 레이드 조회
-function getRaids(db, raidName) {
+function getRaids(db) {
 	return new Promise(async (resolve, reject) => {
 		try {
 			let res = await fs.getDocs(db, 'raids');
@@ -81,49 +101,85 @@ function getRaids(db, raidName) {
 }
 
 //특정 레이드 조회
-function getRaid(db, raidName) {
+function getRaid(db, msg) {
 	return new Promise(async (resolve, reject) => {
 		try {
-			let res = await fs.getDoc(db, 'raids', raidName);
-			if (res.code !== 1)
+			//전체 레이드 리스트 보여주기
+			let res = await showRaidAllList(db);
+			if (res.code === 1) msg.channel.send({ embed: res.embed });
+			else if (res.code === -1) throw new NotFoundError(res.resMsg);
+			else throw new Error(res.resMsg);
+
+			//레이드명 입력
+			let collectRes = await discordUtil.collectMsg(msg, [
+				'조회하실 `레이드명`을 입력해주세요.'
+			]);
+
+			if (collectRes.code === -2) throw new EscapeError(collectRes.replyMsg);
+			let raidName = collectRes.replyMsg;
+
+			//레이드 등록 여부 확인
+			let dbRes = await fs.getDoc(db, 'raids', raidName);
+			if (dbRes.code !== 1)
 				throw new NotFoundError(
 					sprintf('`%s` 해당 레이드를 찾을 수 없습니다.', raidName)
 				);
+			let raidData = dbRes.data;
 
-			let newsArr = [];
-			if (Object.keys(res.data.news).length > 0) {
-				for (var key in _(res.data.news)
+			//공략
+			let strategyArr = [];
+			if (Object.keys(raidData.strategy).length > 0) {
+				for (var key in _(raidData.strategy)
 					.toPairs()
 					.sortBy(0)
 					.fromPairs()
 					.value()) {
-					newsArr.push(sprintf('[%s](%s)', key, res.data.news[key]));
+					strategyArr.push(
+						sprintf('[%s](%s)', key, raidData.strategy[key])
+					);
 				}
-			} else newsArr.push('없음');
+			} else strategyArr.push('없음');
+
+			//참가자
+			let participantsStr = '';
+			if (Object.keys(raidData.participants).length > 0)
+				participantsStr = Object.keys(raidData.participants).join(', ');
+			else participantsStr = '없음';
+
+			//공격대 조회
+			dbRes = await fs.getWhereDoc(db, 'gongdae', {
+				column: 'raidType',
+				operator: '==',
+				value: raidData.name
+			});
+			let gongDaeListArr = [];
+			if (dbRes.code === -1) gongDaeListArr.push('없음');
+			else gongDaeListArr = dbRes.data.slice(0);
 
 			const RaidsEmbed = {
-				color: 0xffa600,
-				title: res.data.name,
+				color: parseInt('0xffa600'),
+				author: {
+					name: raidData.name,
+					icon_url: raidData.imageUrl
+				},
 				fields: [
 					{
 						name: '인원수',
-						value: res.data.personnel,
+						value: raidData.personnel,
 						inline: true
 					},
 					{
 						name: '공략',
-						value: newsArr.join('\n'),
+						value: strategyArr.join(' '),
 						inline: true
 					},
 					{
-						name: '참가 대상자',
-						value: '000'
-						// value: data.participants.join('\n')
+						name: '참가자',
+						value: participantsStr
 					},
 					{
-						name: '진행중인 공격대',
-						value: '111'
-						// value: Object.keys(data.parties).join('\n')
+						name: '등록된 공격대',
+						value: gongDaeListArr.join('\n')
 					}
 				],
 				timestamp: new Date()
@@ -186,9 +242,17 @@ function attendRaid(db, raidName, characterName) {
 }
 
 //레이드 삭제
-async function deleteRaid(db, raidName) {
+async function deleteRaid(db, msg) {
 	return new Promise(async (resolve, reject) => {
 		try {
+			//공대명 입력
+			let collectRes = await discordUtil.collectMsg(msg, [
+				'등록하실 `레이드명`을 입력해주세요.'
+			]);
+
+			if (collectRes.code === -2) throw new EscapeError(collectRes.replyMsg);
+			let raidName = collectRes.replyMsg;
+
 			//레이드 등록여부 확인
 			let res = await fs.getDoc(db, 'raids', raidName);
 			if (res.code === -1)
@@ -197,6 +261,7 @@ async function deleteRaid(db, raidName) {
 				);
 			//레이드 삭제
 			res = await fs.deleteDoc(db, 'raids', raidName);
+			res.data = raidName;
 			resolve(res);
 		} catch (err) {
 			switch (err.name) {
@@ -214,59 +279,60 @@ async function deleteRaid(db, raidName) {
 }
 //레이드 전체 리스트 조회
 async function showRaidAllList(db) {
-	try {
-		let { resMsg, data } = await getRaids(db);
-		let raidInfo = {
-			raidsArr: [],
-			personnelArr: [],
-		};
-		_.each(data, item => {
-			raidInfo.raidsArr.push(item.name);
-			raidInfo.personnelArr.push(item.personnel);
-		});
+	return new Promise(async (resolve, reject) => {
+		try {
+			let { resMsg, data } = await getRaids(db);
+			let raidInfo = {
+				raidsArr: [],
+				personnelArr: []
+			};
+			_.each(data, item => {
+				raidInfo.raidsArr.push(item.name);
+				raidInfo.personnelArr.push(item.personnel);
+			});
 
-		const lookupAllRaidsEmbed = {
-			color: 0xd13fd1,
-			title: '레이드 리스트',
-			description: '등록되어 있는 전체 레이드 리스트입니다.',
-			fields: [
-				{
-					name: '레이드명',
-					value: raidInfo.raidsArr.join('\n'),
-					inline: true
-				},
-				{
-					name: '인원수',
-					value: raidInfo.personnelArr.join('\n'),
-					inline: true
-				}
-			]
-		};
-		return { code: 1, data : raidInfo, embed: lookupAllRaidsEmbed };
-	} catch (err) {
-		switch (err.name) {
-			case 'NotFoundError':
-				resolve({ code: -1, resMsg: err.message });
-				break;
-			case 'DuplicateError':
-				resolve({ code: 2, resMsg: err.message });
-				break;
-			default:
-				resolve({ code: 0, resMsg: err.stack });
+			const lookupAllRaidsEmbed = {
+				color: parseInt('0xffa600'),
+				title: '레이드 목록',
+				fields: [
+					{
+						name: '레이드명',
+						value: raidInfo.raidsArr.join('\n'),
+						inline: true
+					},
+					{
+						name: '인원수',
+						value: raidInfo.personnelArr.join('\n'),
+						inline: true
+					}
+				]
+			};
+			resolve({ code: 1, data: raidInfo, embed: lookupAllRaidsEmbed });
+		} catch (err) {
+			switch (err.name) {
+				case 'NotFoundError':
+					resolve({ code: -1, resMsg: err.message });
+					break;
+				case 'DuplicateError':
+					resolve({ code: 2, resMsg: err.message });
+					break;
+				default:
+					resolve({ code: 0, resMsg: err.stack });
+			}
 		}
-	}
+	});
 }
 
 //레이드 참가 리스트 조회
-async function showAttendRaidList(db, params) {
+async function showAttendRaidList(db, characterName) {
 	try {
 		//캐릭터 등록 확인
-		let { code } = await character.lookupCharacter(db, params[2]);
+		let { code } = await character.lookupCharacterByName(db, characterName);
 		if (code === -1)
 			throw new NotFoundError(
 				sprintf(
 					'`%s`는 등록되지 않은 캐릭터명입니다\n`캐릭터 등록 [캐릭터명]`으로 신청하세요.',
-					params[2]
+					characterName
 				)
 			);
 
@@ -279,15 +345,14 @@ async function showAttendRaidList(db, params) {
 		_.each(data, item => {
 			raidInfo.raidsArr.push(item.name);
 			raidInfo.personnelArr.push(item.personnel);
-			if (_.includes(Object.keys(item.participants), params[2]) === true)
+			if (_.includes(Object.keys(item.participants), characterName) === true)
 				raidInfo.inParticipants.push('✅');
 			else raidInfo.inParticipants.push('❌');
 		});
 
 		const lookupRaidsEmbed = {
 			color: 0xc6fc03,
-			title: '레이드 참가 리스트',
-			description: '본인이 참가가능한 레이드를 신청하세요.',
+			title: '레이드 목록',
 			fields: [
 				{
 					name: '레이드명',
@@ -306,102 +371,94 @@ async function showAttendRaidList(db, params) {
 				}
 			]
 		};
-		return { code: 1, data: lookupRaidsEmbed };
+		return { code: 1, embed: lookupRaidsEmbed };
 	} catch (err) {
 		switch (err.name) {
 			case 'NotFoundError':
-				resolve({ code: -1, resMsg: err.message });
+				return { code: -1, resMsg: err.message };
 				break;
 			case 'DuplicateError':
-				resolve({ code: 2, resMsg: err.message });
+				return { code: 2, resMsg: err.message };
 				break;
 			default:
-				resolve({ code: 0, resMsg: err.stack });
+				return { code: 0, resMsg: err.stack };
 		}
 	}
 }
 
 //레이드 참가
-async function attendRaids(db, msg, params) {
+async function attendRaids(db, msg) {
 	return new Promise(async (resolve, reject) => {
 		try {
-			let sendMsgArr = [];
+			//캐릭터명 입력
+			let collectRes = await discordUtil.collectMsg(msg, [
+				'조회하실 `캐릭터명`을 입력해주세요.'
+			]);
 
-			let res = await showAttendRaidList(db, params);
-			if (res.code) msg.channel.send({ embed: res.data });
-			else
-				new Error(
-					'요청하신 캐릭터에 레이드 참가현황 조회를 실패하였습니다.'
-				);
+			if (collectRes.code === -2) throw new EscapeError(collectRes.replyMsg);
+			let characterName = collectRes.replyMsg;
 
+			let listRes = await showAttendRaidList(db, characterName);
+			if (listRes.code === 1) msg.channel.send({ embed: listRes.embed });
+			else if (listRes.code === -1)
+				throw new NotFoundError(listRes.listResMsg);
+			else throw new Error(listRes.resMsg);
+
+            let sendMsgArr = [];
 			sendMsgArr.push(
-				'참가하실 레이드명을 아래와 같은 형식으로 입력해주세요.'
+				'참가하실 `레이드명`을 입력해주세요. 2개 이상 입력은 스페이스로 구분합니다.'
 			);
 			sendMsgArr.push('```');
 			sendMsgArr.push('미스틱');
-			sendMsgArr.push('카이슈테르, 태만의바다 (2개 이상 입력시)');
+			sendMsgArr.push('카슈4페 태만의바다-하드 (2개 이상 입력시)');
 			sendMsgArr.push('```');
 
-			await msg.channel.send(sendMsgArr.join('\n'));
+			//참가할 레이드 리스트 입력
+			collectRes = await discordUtil.collectMsg(msg, sendMsgArr);
+			if (collectRes.code === -2) throw new EscapeError(collectRes.replyMsg);
+            let replyMsg = collectRes.replyMsg;
 
-			//set msg filter
-			const filter = res => {
-				return res.author.id === msg.author.id;
-			};
+            let attendRaidsArr = [],
+				resArr = undefined,
+				prPool = [],
+				resMsgArr = [];
 
-			msg.channel
-				.awaitMessages(filter, {
-					max: 1,
-					time: 60000,
-					errors: ['time']
-				})
-				.then(async collected => {
-					let replyMsg = collected.first().content,
-						attendRaidsArr = [],
-						resArr = undefined,
-						pr_pool = [],
-						resMsgArr = [];
+			if (_.includes(replyMsg, ',')) {
+				replyMsg = replyMsg.replace(/(, |,| )/gi, ',');
+				attendRaidsArr = replyMsg.split(',');
+			} else if (_.includes(replyMsg, ' ')) {
+				attendRaidsArr = replyMsg.split(' ');
+			} else attendRaidsArr.push(replyMsg);
 
-					if (_.includes(replyMsg, ',') || _.includes(replyMsg, ' ')) {
-						replyMsg = replyMsg.replace(/(, |,| )/, ',');
-						attendRaidsArr = replyMsg.split(',');
-					} else attendRaidsArr.push(replyMsg);
+			_.each(attendRaidsArr, async item => {
+				prPool.push(attendRaid(db, item, characterName));
+			});
+			resArr = await Promise.all(prPool);
+			_.each(resArr, (item, index) => {
+				if (item.code === 1)
+					resMsgArr.push(
+						sprintf(
+							'`%s` 참가신청이 완료되었습니다.',
+							attendRaidsArr[index],
+							item.resMsg
+						)
+					);
+				else
+					resMsgArr.push(
+						sprintf('`%s`%s', attendRaidsArr[index], item.resMsg)
+					);
+			});
+			msg.channel.send(sprintf('%s', resMsgArr.join('\n')));
 
-					_.each(attendRaidsArr, async item => {
-						pr_pool.push(attendRaid(db, item, params[2]));
-					});
-					resArr = await Promise.all(pr_pool);
-					_.each(resArr, (item, index) => {
-						if (item.code === 1)
-							resMsgArr.push(
-								sprintf(
-									'`%s` 참가신청이 완료되었습니다.',
-									attendRaidsArr[index],
-									item.resMsg
-								)
-							);
-						else
-							resMsgArr.push(
-								sprintf('`%s`%s', attendRaidsArr[index], item.resMsg)
-							);
-					});
-					msg.channel.send(sprintf('%s', resMsgArr.join('\n')));
-
-					//레이드 참가 리스트 재조회
-					let res = await showAttendRaidList(db, params);
-					if (res.code) msg.channel.send({ embed: res.data });
-					else
-						new Error(
-							'요청하신 캐릭터에 레이드 참가현황 조회를 실패하였습니다.'
-						);
-					resolve({ code: 1 });
-				})
-				.catch(collected => {
-					resolve({
-						code: 0,
-						resMsg: ':alarm_clock: 응답 시간이 초과 되었습니다.'
-					});
-				});
+			//레이드 참가 리스트 재조회
+			let res = await showAttendRaidList(db, characterName);
+			if (res.code) msg.channel.send({ embed: res.embed });
+			else
+				new Error(
+					'요청하신 캐릭터에 레이드 참가현황 조회를 실패하였습니다.'
+                );
+            //success
+			resolve({ code: 1 });
 		} catch (err) {
 			switch (err.name) {
 				case 'NotFoundError':
@@ -459,87 +516,114 @@ function cancelRaid(db, raidName, characterName) {
 	});
 }
 
-//레이드들 참가 취소
-async function cancelRaids(db, msg, params) {
+//레이드 참가현황 조회
+async function showAttendRaids(db, msg) {
 	return new Promise(async (resolve, reject) => {
 		try {
-			let sendMsgArr = [];
 
-			let res = await showAttendRaidList(db, params);
-			if (res.code) msg.channel.send({ embed: res.data });
-			else
-				new Error(
-					'요청하신 캐릭터에 레이드 참가현황 조회를 실패하였습니다.'
-				);
+            //캐릭터명 입력
+			let collectRes = await discordUtil.collectMsg(msg, [
+				'조회하실 `캐릭터명`을 입력해주세요.'
+			]);
 
+			if (collectRes.code === -2) throw new EscapeError(collectRes.replyMsg);
+			let characterName = collectRes.replyMsg;
+
+			let listRes = await showAttendRaidList(db, characterName);
+			if (listRes.code === 1) msg.channel.send({ embed: listRes.embed });
+			else if (listRes.code === -1)
+				throw new NotFoundError(listRes.listResMsg);
+            else throw new Error(listRes.resMsg);
+            resolve({ code: 1 });
+		} catch (err) {
+			switch (err.name) {
+				case 'NotFoundError':
+					resolve({ code: -1, resMsg: err.message });
+					break;
+				case 'DuplicateError':
+					resolve({ code: 2, resMsg: err.message });
+					break;
+				default:
+					resolve({ code: 0, resMsg: err.stack });
+			}
+		}
+	});
+}
+
+//레이드 참가 취소
+async function cancelRaids(db, msg) {
+	return new Promise(async (resolve, reject) => {
+		try {
+
+            //캐릭터명 입력
+			let collectRes = await discordUtil.collectMsg(msg, [
+				'참가 취소하실 `캐릭터명`을 입력해주세요.'
+			]);
+
+			if (collectRes.code === -2) throw new EscapeError(collectRes.replyMsg);
+			let characterName = collectRes.replyMsg;
+
+			let listRes = await showAttendRaidList(db, characterName);
+			if (listRes.code === 1) msg.channel.send({ embed: listRes.embed });
+			else if (listRes.code === -1)
+				throw new NotFoundError(listRes.listResMsg);
+            else throw new Error(listRes.resMsg);
+
+            let sendMsgArr = [];
 			sendMsgArr.push(
-				'취소하실 레이드명을 아래와 같은 형식으로 입력해주세요.'
+				'참가 취소하실 `레이드`명을 입력해주세요. 2개 이상 입력은 스페이스로 구분합니다.'
 			);
 			sendMsgArr.push('```');
 			sendMsgArr.push('미스틱');
-			sendMsgArr.push('카이슈테르, 태만의바다 (2개 이상 입력시)');
+			sendMsgArr.push('카슈4페 태만의바다-하드 (2개 이상 입력시)');
 			sendMsgArr.push('```');
 
-			await msg.channel.send(sendMsgArr.join('\n'));
+			//참가할 레이드 리스트 입력
+			collectRes = await discordUtil.collectMsg(msg, sendMsgArr);
+			if (collectRes.code === -2) throw new EscapeError(collectRes.replyMsg);
+            let replyMsg = collectRes.replyMsg;
 
-			//set filter
-			const filter = res => {
-				return res.author.id === msg.author.id;
-			};
+            let attendRaidsArr = [],
+				resArr = undefined,
+				prPool = [],
+				resMsgArr = [];
 
-			msg.channel
-				.awaitMessages(filter, {
-					max: 1,
-					time: 60000,
-					errors: ['time']
-				})
-				.then(async collected => {
-					let replyMsg = collected.first().content,
-						cancelRaidsArr = [],
-						resArr = undefined,
-						pr_pool = [],
-						resMsgArr = [];
+			if (_.includes(replyMsg, ',')) {
+				replyMsg = replyMsg.replace(/(, |,| )/gi, ',');
+				attendRaidsArr = replyMsg.split(',');
+			} else if (_.includes(replyMsg, ' ')) {
+				attendRaidsArr = replyMsg.split(' ');
+			} else attendRaidsArr.push(replyMsg);
 
-					if (_.includes(replyMsg, ',') || _.includes(replyMsg, ' ')) {
-						replyMsg = replyMsg.replace(/(, |,| )/, ',');
-						cancelRaidsArr = replyMsg.split(',');
-					} else cancelRaidsArr.push(replyMsg);
+			_.each(attendRaidsArr, async item => {
+				prPool.push(cancelRaid(db, item, characterName));
+			});
+            resArr = await Promise.all(prPool);
+            _.each(resArr, (item, index) => {
+                if (item.code === 1)
+                    resMsgArr.push(
+                        sprintf(
+                            '`%s` 참가취소가 완료되었습니다.',
+                            cancelRaidsArr[index],
+                            item.resMsg
+                        )
+                    );
+                else
+                    resMsgArr.push(
+                        sprintf('`%s`%s', cancelRaidsArr[index], item.resMsg)
+                    );
+            });
+            msg.channel.send(sprintf('%s', resMsgArr.join('\n')));
 
-					_.each(cancelRaidsArr, async item => {
-						pr_pool.push(cancelRaid(db, item, params[2]));
-					});
-					resArr = await Promise.all(pr_pool);
-					_.each(resArr, (item, index) => {
-						if (item.code === 1)
-							resMsgArr.push(
-								sprintf(
-									'`%s` 참가취소가 완료되었습니다.',
-									cancelRaidsArr[index],
-									item.resMsg
-								)
-							);
-						else
-							resMsgArr.push(
-								sprintf('`%s`%s', cancelRaidsArr[index], item.resMsg)
-							);
-					});
-					msg.channel.send(sprintf('%s', resMsgArr.join('\n')));
-
-					//레이드 참가 리스트 재조회
-					let res = await showAttendRaidList(db, params);
-					if (res.code) msg.channel.send({ embed: res.data });
-					else
-						new Error(
-							'요청하신 캐릭터에 레이드 참가현황 조회를 실패하였습니다.'
-						);
-					resolve({ code: 1 });
-				})
-				.catch(collected => {
-					resolve({
-						code: 0,
-						resMsg: ':alarm_clock: 응답 시간이 초과 되었습니다.'
-					});
-				});
+            //레이드 참가 리스트 재조회
+            let res = await showAttendRaidList(db, characterName);
+            if (res.code) msg.channel.send({ embed: res.data });
+            else
+                new Error(
+                    '요청하신 캐릭터에 레이드 참가현황 조회를 실패하였습니다.'
+                );
+            //success
+            resolve({ code: 1 });
 		} catch (err) {
 			switch (err.name) {
 				case 'NotFoundError':
@@ -563,6 +647,7 @@ module.exports.deleteRaid = deleteRaid;
 module.exports.getRaid = getRaid;
 module.exports.getRaids = getRaids;
 module.exports.attendRaid = attendRaid;
+module.exports.showAttendRaids = showAttendRaids;
 module.exports.showAttendRaidList = showAttendRaidList;
 module.exports.showRaidAllList = showRaidAllList;
 module.exports.attendRaids = attendRaids;
